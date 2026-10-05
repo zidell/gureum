@@ -100,6 +100,18 @@ public class InputReceiver: InputTextDelegate {
 
     let commited = commitCompositionEvent(sender)  // 조합 된 문자 반영
     if result.action == .commit {
+      // 터미널 등 일부 앱은 조합 중에 받은 엔터를 확정에만 쓰고 버린다.
+      // 확정 후 원래 엔터는 삼키고, 조합이 끝난 상태에서 엔터를 다시 보내 한 번에 전송되게 한다.
+      if #available(macOS 10.15, *), keyCode == .return, hadComposedString,
+        composer.delegate is HangulComposer,
+        flags.intersection(.deviceIndependentFlagsMask).subtracting(.capsLock).isEmpty
+      {
+        if CGPreflightPostEventAccess() {
+          DispatchQueue.main.async { InputReceiver.postReturnKey() }
+          return .processed
+        }
+        CGRequestPostEventAccess()
+      }
       return result
     }
     let hasComposedString = !_internalComposedString.isEmpty
@@ -211,6 +223,16 @@ extension InputReceiver {  // IMKServerInput
   func cancelCompositionEvent() {
     dlog(debugLogging, "LOGGING::EVENT::CANCEL")
     composer.cancelComposition()
+  }
+
+  static func postReturnKey() {
+    let source = CGEventSource(stateID: .hidSystemState)
+    for keyDown in [true, false] {
+      CGEvent(
+        keyboardEventSource: source, virtualKey: CGKeyCode(KeyCode.return.rawValue),
+        keyDown: keyDown)?
+        .post(tap: .cghidEventTap)
+    }
   }
 
   var _internalComposedString: String {
